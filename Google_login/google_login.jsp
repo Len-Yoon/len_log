@@ -12,6 +12,9 @@
 
 
 <script>
+    <%-- 크롬 프로필 정보 파싱 --%>
+    var profile = googleUser.getBasicProfile();
+
     <%-- Ajax 이용한 구글 로그인  --%>
     $.ajax({
         url: 'googleSignIn',
