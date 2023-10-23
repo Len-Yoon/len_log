@@ -1,0 +1,648 @@
+<?mapper version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd" >
+
+<mapper namespace="support">
+    <select id="selectLastGradeDate" resultType="String">
+    SELECT grade_date
+    FROM tbnws_dw_grade
+    ORDER BY grade_date DESC
+    LIMIT 1
+    </select>
+
+    <select id="selectAllGradeList" resultType="com.tbnws.gtgear.support.model.SupportVO">
+        SELECT
+        a.*,
+        IFNULL(b.available_month, -1) AS available_month
+        FROM (
+            SELECT
+            a.brand_code,
+            b.goods_code,
+            c.option_code
+            FROM tbnws_erp_brand AS a
+            LEFT JOIN tbnws_erp_goods b
+                ON (a.category_code = b.category_code AND a.brand_code = b.brand_code)
+            LEFT JOIN tbnws_erp_goods_option c
+                ON (b.category_code = c.category_code AND b.brand_code = c.brand_code AND b.goods_code = c.goods_code)
+            WHERE a.category_code IN ('F','G')
+            <if test='brandCode != ""'>
+                AND a.brand_code = #{brandCode}
+                <if test='goodsCode != ""'>
+                    AND b.goods_code = #{goodsCode}
+                    <if test='optionCode != ""'>
+                        AND c.option_code = #{optionCode}
+                    </if>
+                </if>
+            </if>
+            GROUP BY brand_code, goods_code, option_code
+            ) a
+        LEFT JOIN (
+            SELECT
+            aa.*,
+            ROUND(IFNULL((aa.ea / ROUND((IFNULL(aa.three_month_ea, 0) / 3), 1)), -1), 1) AS available_month
+            FROM (
+                SELECT
+                brand_code,
+                goods_code,
+                option_code,
+                SUM(ea) AS ea,
+                SUM(be_due_ea) AS be_due_ea,
+                SUM(ea + be_due_ea) AS total_ea,
+                <![CDATA[
+                    SUM((CASE WHEN ea = -1 AND partner_code NOT IN ('ptn0000', 'ptn0001', 'ptn0100', 'ptn0103', 'ptn0124') AND DATE(DATE) >= DATE_ADD(CURDATE(), INTERVAL -1 WEEK) AND DATE(DATE) <= CURDATE() THEN 1 ELSE 0 END)) AS one_week_ea,
+                    SUM((CASE WHEN ea = -1 AND partner_code NOT IN ('ptn0000', 'ptn0001', 'ptn0100', 'ptn0103', 'ptn0124') AND DATE(DATE) >= DATE_ADD(CURDATE(), INTERVAL -1 MONTH) AND DATE(DATE) <= CURDATE() THEN 1 ELSE 0 END)) AS one_month_ea,
+                    SUM((CASE WHEN ea = -1 AND partner_code NOT IN ('ptn0000', 'ptn0001', 'ptn0100', 'ptn0103', 'ptn0124') AND DATE(DATE) >= DATE_ADD(CURDATE(), INTERVAL -3 MONTH) AND DATE(DATE) <= CURDATE() THEN 1 ELSE 0 END)) AS three_month_ea
+                ]]>
+                FROM (
+                    SELECT
+                    category_code,
+                    brand_code,
+                    goods_code,
+                    option_code,
+                    partner_code,
+
+                    IF(import_date IS NULL AND category_code = 'G', 0, ea) AS ea,
+                    IF(import_date IS NULL AND category_code = 'G', ea, 0) AS be_due_ea,
+                    import_date AS DATE
+
+                    FROM tbnws_erp_import
+
+                    <![CDATA[
+                    WHERE import_date <= #{gradeDate}
+                    ]]>
+                    <if test='brandCode != ""'>
+                        AND brand_code = #{brandCode}
+                        <if test='goodsCode != ""'>
+                            AND goods_code = #{goodsCode}
+                            <if test='optionCode != ""'>
+                                AND option_code = #{optionCode}
+                            </if>
+                        </if>
+                    </if>
+
+                    UNION ALL
+
+                    SELECT
+                    category_code,
+                    brand_code,
+                    goods_code,
+                    option_code,
+                    partner_code,
+                    -1 AS ea,
+                    0 AS be_due_ea,
+                    export_date AS DATE
+                    FROM tbnws_erp_export
+                    WHERE category_code IN ('F','G')
+                    <![CDATA[
+                    AND export_date <= #{gradeDate}
+                    ]]>
+                    <if test='brandCode != ""'>
+                        AND brand_code = #{brandCode}
+                        <if test='goodsCode != ""'>
+                            AND goods_code = #{goodsCode}
+                            <if test='optionCode != ""'>
+                                AND option_code = #{optionCode}
+                            </if>
+                        </if>
+                    </if>
+
+                )AS a
+                GROUP BY brand_code, goods_code, option_code
+            )aa
+        ) AS b
+        ON (a.brand_code = b.brand_code AND a.goods_code = b.goods_code AND (a.option_code IS NULL OR a.option_code = b.option_code))
+        GROUP BY a.brand_code, a.goods_code, a.option_code
+    </select>
+
+    <insert id="insertDwGrade">
+        INSERT INTO tbnws_dw_grade(
+            grade_date,
+            brand_code,
+            goods_code,
+            option_code,
+            available_month
+        ) VALUES (
+            #{gradeDate},
+            #{brandCode},
+            #{goodsCode},
+            #{optionCode},
+            #{availableMonth}
+        )
+    </insert>
+
+    <delete id="deleteDwGrade">
+        DELETE FROM tbnws_dw_grade
+        WHERE grade_date >= #{lastGradeDate}
+        <if test='brandCode != ""'>
+            AND brand_code = #{brandCode}
+            <if test='goodsCode != ""'>
+                AND goods_code = #{goodsCode}
+                <if test='optionCode != ""'>
+                    AND option_code = #{optionCode}
+                </if>
+            </if>
+        </if>
+    </delete>
+
+    <select id="selectSearchList" resultType="com.tbnws.gtgear.support.model.SupportVO">
+        SELECT
+            a.brand_code,
+            a.brand_name,
+            b.goods_code,
+            b.goods_name,
+            c.option_code,
+            c.option_name,
+            CASE
+                WHEN c.option_code IS NULL THEN b.actual_price
+                ELSE c.actual_price
+                END AS actual_price,
+            CASE
+                WHEN c.option_code IS NULL THEN b.duty
+                ELSE c.duty
+                END AS duty
+        FROM tbnws_erp_brand AS a
+
+                 LEFT JOIN tbnws_erp_goods AS b
+                           ON (a.category_code = b.category_code AND a.brand_code = b.brand_code)
+
+                 LEFT JOIN tbnws_erp_goods_option AS c
+                           ON (a.category_code = c.category_code AND a.brand_code = c.brand_code AND b.goods_code = c.goods_code)
+
+        WHERE a.category_code IN ('F','G')
+          AND (CASE WHEN c.option_code IS NULL THEN b.type = 'G' ELSE c.type ='G' END)
+          AND (CASE WHEN c.option_code IS NULL THEN b.status = 'Y' ELSE c.status ='Y' END)
+
+        GROUP BY brand_code, goods_code, option_code
+        ORDER BY brand_code ASC, goods_code ASC, option_code ASC
+    </select>
+
+    <select id="selectGoodsName" resultType="String">
+        SELECT
+        DISTINCT(CONCAT("[",b.brand_name, "] ", c.goods_name, IF(d.option_code IS NULL, "", CONCAT("-", d.option_name)))) AS 'goods_name'
+
+        FROM tbnws_erp_category AS a
+        LEFT JOIN tbnws_erp_brand b
+        ON a.category_code = b.category_code
+        LEFT JOIN tbnws_erp_goods c
+        ON (a.category_code = c.category_code AND b.brand_code = c.brand_code)
+        LEFT JOIN tbnws_erp_goods_option d
+        ON (a.category_code = d.category_code AND b.brand_code = d.brand_code AND c.goods_code = d.goods_code)
+
+        WHERE a.category_code IN ('F','G')
+        <if test='brandCode != ""'>
+            AND b.brand_code = #{brandCode}
+            <if test='goodsCode != ""'>
+                AND c.goods_code = #{goodsCode}
+                <if test='optionCode != ""'>
+                    AND d.option_code = #{optionCode}
+                </if>
+            </if>
+        </if>
+        LIMIT 1
+    </select>
+
+    <select id="selectTrafficInfo" resultType="com.tbnws.gtgear.support.model.SupportVO">
+        SELECT
+        stock.*,
+        (
+            SELECT order_seq
+            FROM tbnws_erp_import
+            WHERE order_seq IS NOT NULL
+            AND category_code = 'G'
+            AND partner_code NOT IN ('ptn0000', 'ptn0001', 'ptn0100', 'ptn0103', 'ptn0124')
+            <if test='brandCode != ""'>
+                AND brand_code = #{brandCode}
+                <if test='goodsCode != ""'>
+                    AND goods_code = #{goodsCode}
+                    <if test='optionCode != ""'>
+                        AND option_code = #{optionCode}
+                    </if>
+                </if>
+            </if>
+            ORDER BY import_seq DESC
+            LIMIT 1
+            ) AS order_seq,
+        (
+            SELECT import_date
+            FROM tbnws_erp_import
+            WHERE order_seq IS NOT NULL
+            AND category_code = 'G'
+            AND partner_code NOT IN ('ptn0000', 'ptn0001', 'ptn0100', 'ptn0103', 'ptn0124')
+
+            AND brand_code = 'brd0029'
+
+            AND goods_code = 'gs0097'
+
+            AND option_code = 'opt0004'
+
+            ORDER BY import_seq DESC
+            LIMIT 1
+        ) AS import_date,
+        (
+            SELECT DATEDIFF(import_date, order_date) AS DATEDIFF
+            FROM tbnws_erp_import
+            WHERE order_seq IS NOT NULL
+            AND category_code = 'G'
+            AND import_date IS NOT NULL
+            AND partner_code NOT IN ('ptn0000', 'ptn0001', 'ptn0100', 'ptn0103', 'ptn0124')
+            <if test='brandCode != ""'>
+                AND brand_code = #{brandCode}
+                <if test='goodsCode != ""'>
+                    AND goods_code = #{goodsCode}
+                    <if test='optionCode != ""'>
+                        AND option_code = #{optionCode}
+                    </if>
+                </if>
+            </if>
+            ORDER BY import_date DESC
+            LIMIT 1) AS date_diff,
+        (
+            SELECT order_date
+            FROM tbnws_erp_import
+            WHERE order_seq IS NOT NULL
+            AND category_code = 'G'
+            AND partner_code NOT IN ('ptn0000', 'ptn0001', 'ptn0100', 'ptn0103', 'ptn0124')
+            <if test='brandCode != ""'>
+                AND brand_code = #{brandCode}
+                <if test='goodsCode != ""'>
+                    AND goods_code = #{goodsCode}
+                    <if test='optionCode != ""'>
+                        AND option_code = #{optionCode}
+                    </if>
+                </if>
+            </if>
+
+            GROUP BY import_seq, category_code, brand_code, goods_code, option_code
+            ORDER BY import_seq DESC
+            LIMIT 1) AS order_date,
+            (SELECT vat_flag
+            FROM tbnws_erp_order
+            WHERE order_seq IN (
+                SELECT order_seq
+                FROM tbnws_erp_import
+                WHERE order_seq IS NOT NULL
+                AND category_code = 'G'
+                AND partner_code NOT IN ('ptn0000', 'ptn0001', 'ptn0100', 'ptn0103', 'ptn0124')
+                <if test='brandCode != ""'>
+                    AND brand_code = #{brandCode}
+                    <if test='goodsCode != ""'>
+                        AND goods_code = #{goodsCode}
+                        <if test='optionCode != ""'>
+                            AND option_code = #{optionCode}
+                        </if>
+                    </if>
+                </if>
+            )
+            GROUP BY vat_flag
+            ORDER BY COUNT(*) DESC
+            LIMIT 1) as 'vat_flag'
+        FROM (
+            SELECT
+            c.brand_code,
+            c.goods_code,
+            c.option_code,
+            SUM(CASE WHEN c.category_code = 'G' THEN ea END) AS g_ea,
+            SUM(CASE WHEN c.category_code = 'F' THEN ea END) AS f_ea,
+            SUM(CASE WHEN c.category_code = 'G' THEN be_due_ea END) AS g_be_due_ea,
+            SUM(CASE WHEN c.category_code = 'F' THEN be_due_ea END) AS f_be_due_ea,
+            SUM(CASE WHEN c.category_code = 'G' THEN schedule_ea END) AS g_schedule_ea,
+            SUM(CASE WHEN c.category_code = 'F' THEN schedule_ea END) AS f_schedule_ea,
+            AVG(CASE WHEN c.category_code = 'G' AND buying_price != 0 THEN buying_price END) AS buying_price
+            FROM (
+            SELECT
+            category_code,
+            brand_code,
+            goods_code,
+            option_code,
+            IF(import_date IS NULL, 0, ea) AS ea,
+            IF(import_date IS NULL, ea, 0) AS be_due_ea,
+            0 AS schedule_ea,
+            CASE WHEN currency='KRW' THEN buying_price
+            WHEN currency='USD' THEN (buying_price * cur2krw)
+            WHEN currency='EUR' THEN (buying_price * cur2krw)
+            END AS buying_price
+            FROM tbnws_erp_import
+            <if test='brandCode != ""'>
+                WHERE brand_code = #{brandCode}
+                <if test='goodsCode != ""'>
+                    AND goods_code = #{goodsCode}
+                    <if test='optionCode != ""'>
+                        AND option_code = #{optionCode}
+                    </if>
+                </if>
+            </if>
+
+            UNION ALL
+
+            SELECT
+            category_code,
+            brand_code,
+            goods_code,
+            option_code,
+            -1 AS ea,
+            0 AS be_due_ea,
+            0 AS schedule_ea,
+            NULL AS buying_price
+            FROM tbnws_erp_export
+            <if test='brandCode != ""'>
+                WHERE brand_code = #{brandCode}
+                <if test='goodsCode != ""'>
+                    AND goods_code = #{goodsCode}
+                    <if test='optionCode != ""'>
+                        AND option_code = #{optionCode}
+                    </if>
+                </if>
+            </if>
+
+            UNION ALL
+
+            SELECT
+            category_code,
+            brand_code,
+            goods_code,
+            option_code,
+            0 AS ea,
+            0 AS be_due_ea,
+            SUM(CASE WHEN export_flag = 'N' THEN ea ELSE 0 END) AS schedule_ea,
+            NULL AS buying_price
+            FROM tbnws_erp_export_schedule_item
+            <if test='brandCode != ""'>
+                WHERE brand_code = #{brandCode}
+                <if test='goodsCode != ""'>
+                    AND goods_code = #{goodsCode}
+                    <if test='optionCode != ""'>
+                        AND option_code = #{optionCode}
+                    </if>
+                </if>
+            </if>
+            ) c
+            GROUP BY brand_code, goods_code, option_code
+        ) stock
+        WHERE brand_code IS NOT NULL
+    </select>
+
+    <select id="selectOrderTableInfo" resultType="com.tbnws.gtgear.support.model.SupportVO">
+        SELECT *
+        FROM tbnws_erp_order
+        WHERE order_seq = #{orderSeq}
+    </select>
+
+    <select id="selectBuyingPriceInfo" resultType="com.tbnws.gtgear.support.model.SupportVO">
+        SELECT DISTINCT(order_date) ,buying_price,currency,cur2krw
+        FROM tbnws_erp_import
+        WHERE partner_code NOT IN ('ptn0000', 'ptn0001', 'ptn0100', 'ptn0103', 'ptn0124')
+        <if test='brandCode != ""'>
+            AND brand_code = #{brandCode}
+            <if test='goodsCode != ""'>
+                AND goods_code = #{goodsCode}
+                <if test='optionCode != ""'>
+                    AND option_code = #{optionCode}
+                </if>
+            </if>
+        </if>
+        AND category_code = 'G'
+        AND order_seq IS NOT NULL
+        ORDER BY import_seq DESC
+        LIMIT 3
+    </select>
+
+    <select id="selectMemo" resultType="com.tbnws.gtgear.support.model.SupportVO">
+        SELECT *
+        FROM tbnws_erp_goods_memo AS a
+        LEFT JOIN gtgear_admin_member AS b
+            ON a.muid = b.uid
+        WHERE brand_code = #{brandCode}
+        AND goods_code = #{goodsCode}
+        <if test='optionCode != ""'>
+            AND option_code = #{optionCode}
+        </if>
+    </select>
+
+    <select id="selectAllSearchMemoList" resultType="com.tbnws.gtgear.support.model.SupportVO">
+        SELECT a.*,
+               b.name,
+               c.brand_name,
+               d.goods_name,
+               e.option_name
+        FROM tbnws_erp_goods_memo AS a
+            LEFT JOIN gtgear_admin_member AS b
+               ON a.muid = b.uid
+            LEFT JOIN tbnws_erp_brand AS c
+               ON c.category_code IN ('G', 'F') AND a.brand_code = c.brand_code
+            LEFT JOIN tbnws_erp_goods AS d
+               ON d.category_code IN ('G', 'F') AND a.brand_code = d.brand_code AND a.goods_code = d.goods_code
+            LEFT JOIN tbnws_erp_goods_option AS e
+               ON e.category_code IN ('G', 'F') AND a.brand_code = e.brand_code AND a.goods_code = e.goods_code AND a.option_code = e.option_code
+        <![CDATA[
+        WHERE DATE_FORMAT(a.regist_date, '%Y-%m-%d') >= #{startMemoDate}
+          AND DATE_FORMAT(a.regist_date, '%Y-%m-%d') <= #{endMemoDate}
+        ]]>
+        GROUP BY seq
+    </select>
+
+    <select id="selectGoodsMemoInfo" resultType="com.tbnws.gtgear.support.model.SupportVO">
+        SELECT *
+        FROM tbnws_erp_goods_memo
+        WHERE seq = #{seq}
+    </select>
+
+    <insert id="insertGoodsMemoInfo">
+        INSERT INTO tbnws_erp_goods_memo(
+            brand_code,
+            goods_code,
+            <if test='optionCode != ""'>
+                option_code,
+            </if>
+            memo,
+            muid
+        ) VALUES (
+            #{brandCode},
+            #{goodsCode},
+            <if test='optionCode != ""'>
+                #{optionCode},
+            </if>
+            #{memo},
+            #{uid}
+        )
+    </insert>
+
+    <delete id="deleteGoodsMemoInfo">
+        DELETE FROM tbnws_erp_goods_memo
+        WHERE seq = #{seq}
+    </delete>
+
+    <update id="editGoodsMemoInfo">
+        UPDATE tbnws_erp_goods_memo
+        SET memo = #{memo}
+        WHERE seq = #{seq}
+    </update>
+
+    <select id="searchGoodsOrder" resultType="com.tbnws.gtgear.support.model.SupportVO">
+        SELECT
+            a.order_seq,
+            b.order_title,
+            b.order_date,
+            c.partner_name,
+            a.total_import_ea,
+            a.imported_ea,
+            a.clearance_confirm_ea,
+            a.sale_confirm_ea,
+            b.dep_flag,
+            b.arr_flag,
+            b.vat_flag,
+            ea,
+            buying_price,
+            currency,
+            cur2krw
+        FROM (
+            SELECT
+            aa.order_seq,
+            SUM(aa.ea) AS 'ea',
+            SUM(aa.price) AS 'price',
+            aa.buying_price AS 'buying_price',
+            aa.currency,
+            aa.cur2krw,
+            COUNT(*) AS total_import_ea,
+            COUNT(aa.import_date) AS imported_ea,
+            COUNT(aa.clearance_confirm) AS clearance_confirm_ea,
+            COUNT(aa.sale_confirm) AS sale_confirm_ea
+            FROM (
+                SELECT
+                a.order_seq,
+                a.category_code,
+                a.brand_code,
+                a.goods_code,
+                a.option_code,
+                a.ea,
+                a.buying_price,
+                currency,
+                cur2krw,
+                (buying_price * cur2krw) AS 'price',
+                a.import_date,
+                a.clearance_confirm,
+                a.sale_confirm
+                FROM tbnws_erp_import AS a
+
+                WHERE a.order_seq IS NOT NULL
+                <if test='brandCode != ""'>
+                    AND brand_code = #{brandCode}
+                    <if test='goodsCode != ""'>
+                        AND goods_code = #{goodsCode}
+                        <if test='optionCode != ""'>
+                            AND option_code = #{optionCode}
+                        </if>
+                    </if>
+                </if>
+                ) aa
+
+            GROUP BY aa.order_seq
+            ) AS a
+
+        LEFT JOIN (
+            SELECT
+            order_seq,
+            order_title,
+            order_date,
+            partner_code,
+            dep_flag,
+            arr_flag,
+            vat_flag
+            FROM tbnws_erp_order
+        ) AS b
+        ON (a.order_seq = b.order_seq)
+
+        LEFT JOIN tbnws_erp_partner AS c
+        ON (b.partner_code = c.partner_code)
+    </select>
+
+    <select id="selectTrafficChart" resultType="com.tbnws.gtgear.support.model.SupportVO">
+        SELECT
+            aa.day,
+            SUM(IFNULL(CASE WHEN bb.category_code = 'G' THEN bb.count END,0)) AS g_traffic_count,
+            SUM(IFNULL(CASE WHEN bb.category_code = 'F' THEN bb.count END,0)) AS f_traffic_count
+        FROM (
+            SELECT  DATE_FORMAT((CURDATE() - INTERVAL (a.a + (10 * b.a) + (100 * c.a)) DAY), #{chartDateType}) AS DAY
+            FROM (
+            SELECT 0 AS a UNION ALL SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3 UNION ALL SELECT 4 UNION ALL
+            SELECT 5 UNION ALL SELECT 6 UNION ALL SELECT 7 UNION ALL SELECT 8 UNION ALL SELECT 9
+            ) AS a
+            CROSS JOIN (
+            SELECT 0 AS a UNION ALL SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3 UNION ALL SELECT 4 UNION ALL
+            SELECT 5 UNION ALL SELECT 6 UNION ALL SELECT 7 UNION ALL SELECT 8 UNION ALL SELECT 9
+            ) AS b
+            CROSS JOIN (
+            SELECT 0 AS a UNION ALL SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3 UNION ALL SELECT 4 UNION ALL
+            SELECT 5 UNION ALL SELECT 6 UNION ALL SELECT 7 UNION ALL SELECT 8 UNION ALL SELECT 9
+            ) AS c
+            GROUP BY DAY
+        ) aa
+        LEFT JOIN (
+            SELECT
+            COUNT(*) AS COUNT,
+            category_code,
+            brand_code,
+            goods_code,
+            option_code,
+            DATE_FORMAT(export_date, #{chartDateType}) AS export_date
+            FROM tbnws_erp_export
+            WHERE export_date BETWEEN #{startGraphDate} AND #{endGraphDate}
+            AND partner_code NOT IN ('ptn0000', 'ptn0001', 'ptn0100', 'ptn0103', 'ptn0124')
+            AND brand_code = #{brandCode}
+            AND goods_code = #{goodsCode}
+            <if test='optionCode != ""'>
+                AND option_code = #{optionCode}
+            </if>
+            GROUP BY category_code, brand_code, goods_code, option_code, export_date
+            ) bb
+        ON (aa.day = bb.export_date)
+        <![CDATA[
+        WHERE DAY >= DATE_FORMAT(#{startGraphDate}, #{chartDateType})
+        AND DAY <= DATE_FORMAT(#{endGraphDate}, #{chartDateType})
+        ]]>
+        GROUP BY DAY
+        ORDER BY DAY
+    </select>
+
+    <select id="selectGradeGraph" resultType="com.tbnws.gtgear.support.model.SupportVO">
+        SELECT DATE_FORMAT(grade_date, #{graphDateType}) AS grade_date,
+            brand_code,
+            goods_code,
+            option_code,
+            grade,
+            SUM(CASE WHEN available_month != -1 THEN available_month ELSE 0 END) / CASE WHEN SUM(CASE WHEN available_month != -1 THEN 1 ELSE 0 END) != 0 THEN SUM(CASE WHEN available_month != -1 THEN 1 ELSE 0 END) ELSE 1 END AS available_month,
+            b.DAY
+        FROM tbnws_dw_grade AS a
+        LEFT JOIN (
+            SELECT  DATE_FORMAT((CURDATE() - INTERVAL (a.a + (10 * b.a) + (100 * c.a)) DAY), #{graphDateType}) AS DAY
+            FROM (
+            SELECT 0 AS a UNION ALL SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3 UNION ALL SELECT 4 UNION ALL
+            SELECT 5 UNION ALL SELECT 6 UNION ALL SELECT 7 UNION ALL SELECT 8 UNION ALL SELECT 9
+            ) AS a
+            CROSS JOIN (
+            SELECT 0 AS a UNION ALL SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3 UNION ALL SELECT 4 UNION ALL
+            SELECT 5 UNION ALL SELECT 6 UNION ALL SELECT 7 UNION ALL SELECT 8 UNION ALL SELECT 9
+            ) AS b
+            CROSS JOIN (
+            SELECT 0 AS a UNION ALL SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3 UNION ALL SELECT 4 UNION ALL
+            SELECT 5 UNION ALL SELECT 6 UNION ALL SELECT 7 UNION ALL SELECT 8 UNION ALL SELECT 9
+            ) AS c
+            GROUP BY DAY
+            ) AS b
+            ON (DATE_FORMAT(a.grade_date, #{graphDateType}) = b.day)
+        <![CDATA[
+        WHERE DAY >= DATE_FORMAT(#{startGradeDate}, #{graphDateType})
+        AND DAY <= DATE_FORMAT(#{endGradeDate}, #{graphDateType})
+        ]]>
+        <if test='brandCode != ""'>
+            AND brand_code = #{brandCode}
+            <if test='goodsCode != ""'>
+                AND goods_code = #{goodsCode}
+                <if test='optionCode != ""'>
+                    AND option_code = #{optionCode}
+                </if>
+            </if>
+        </if>
+        GROUP BY DATE_FORMAT(a.grade_date, #{graphDateType})
+        ORDER BY DAY ASC
+    </select>
+
+</mapper>
