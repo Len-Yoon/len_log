@@ -1272,7 +1272,6 @@ public class Utils {
     }
 
     /**
-     * 230818 BS - 카페24 액세스 토큰, 리프레시 토큰 첫 발행
      *
      * @param mall_id 어플리케이션이 설치되는 상점의 아이디 - 필수
      * @param authorize_code 카페24 토큰 신규 발급에 필요한 인증 코드 - 필수
@@ -1294,7 +1293,6 @@ public class Utils {
     }
 
     /**
-     * 230821 BS - 카페24 액세스 토큰, 리프레시 토큰 파일 저장용 함수
      *
      * @param at Access Token
      * @param rt Refresh Token
@@ -1307,7 +1305,7 @@ public class Utils {
     }
 
     /**
-     * 230821 BS - 카페24 액세스 토큰, 리프레시 토큰 파일에서 읽어서 반환
+     * 
      *
      * @return {"at": "액세스 토큰", "rt": "리프레시 토큰"}
      */
@@ -1320,9 +1318,7 @@ public class Utils {
         return rtn;
     }
 
-    /**
-     * 230818 BS - 카페24 토큰 재발급(크론 예정)
-     */
+
     public void renewCafe24AuthTokens() {
         /**
          * 추가할 내용
