@@ -886,52 +886,6 @@
         $(row).parent().parent().parent().remove();
     }
 
-    function insertAutoPrelaunching() {
-        var object = $("#object").val();
-        var prelaunchingSeq = $("#preLaunching_seq").val();
-
-        swal({
-            title: '프리런칭 자동 참여자 추가',
-            text: '해당 프리런칭 발송 메세지를 제작 후 추가 해주세요.',
-            type: 'info',
-            showCancelButton: true,
-            closeOnConfirm: false,
-            confirmButtonText: "업데이트",
-            cancelButtonText: "취소"
-        }, function () {
-            $.ajax({
-                url: '/event/insertAutoPrelaunching',
-                type: 'POST',
-                async: false,
-
-                success: function (rtn) {
-                    if(rtn > 0) {
-                        swal({
-                            title: 'SUCCESS',
-                            text: '프리런칭 자동참여자가 추가 되었습니다.',
-                            type: 'success'
-                        }, function () {
-                            swal.close();
-                        })
-                    } else {
-                        swal({
-                            title: "WARNING",
-                            text: "알 수 없는 오류가 발생하였습니다.",
-                            type: "warning"
-                        });
-                    }
-                },
-                error: function (jqXHR, textStatus, errorThrown) {
-                    swal("ajax error", "preLaunchingList.jsp - insertAutoPrelaunching()", "error");
-                    console.log(jqXHR.responseText);
-                    console.log(textStatus);
-                    console.log(errorThrown);
-                }
-            });
-        });
-    }
-
-
     $(document).ready(function () {
         $('#start_date_picker').datetimepicker({
             format: "YYYY-MM-DD"
